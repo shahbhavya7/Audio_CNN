@@ -12,6 +12,7 @@ from torch.optim.lr_scheduler import OneCycleLR
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
+
 from model import AudioCNN
 
 app = modal.App("cnn-aud")
@@ -76,6 +77,22 @@ class ESC50Dataset(Dataset): # This class defines the ESC-50 dataset for audio c
             spectrogram = waveform
 
         return spectrogram, row['label'] # returns the spectrogram (or waveform) and the corresponding label for the audio file.
+    
+def mixup_data(x, y): # it takes a batch of inputs x and their corresponding labels y, and returns mixed inputs and labels creating new training samples for data augmentation.
+    # data augmentation technique that creates new training samples by combining pairs of examples and their labels.
+    lam = np.random.beta(0.2, 0.2) # lambda is sampled from a Beta distribution with parameters alpha=0.2 and beta=0.2, which controls the degree of mixing between two samples.
+
+    batch_size = x.size(0)  # batch_size is the number of samples in the batch extracted from the first dimension of x.
+    index = torch.randperm(batch_size).to(x.device) # index is a random permutation of indices from 0 to batch_size-1, used to shuffle the batch.
+
+    mixed_x = lam * x + (1 - lam) * x[index, :] # mixed_x is the new input created by linearly combining each sample in x with another randomly selected 
+    # sample from the batch, weighted by lambda. like (0.7 * sample1 + 0.3 * sample2) i.e 70% of sample1 and 30% of sample2 in the new sample.
+    y_a, y_b = y, y[index] # y_a is the original label and y_b is the label of the randomly selected sample via index.
+    return mixed_x, y_a, y_b, lam # returns the mixed inputs, the two sets of labels, and the mixing coefficient lambda.
+
+
+def mixup_criterion(criterion, pred, y_a, y_b, lam): # computes the loss for the mixed inputs created by mixup_data, using the provided loss function criterion.
+    return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b) # computes the loss as a weighted sum of the losses for the two sets of labels, weighted by lambda and (1-lambda) respectively.
 
 @app.function(image=image, gpu="A10G", volumes={"/data": volume, "/models": model_volume}, timeout=60 * 60 * 3)
 # runs on A10G GPU, mounts the dataset and model volumes, and sets a timeout of 3 hours for training.
@@ -124,50 +141,58 @@ def train():
     print(f"Training samples: {len(train_dataset)}") # printing the number of samples in the training and validation datasets.
     print(f"Val samples: {len(val_dataset)}")
 
-    # train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-    # test_dataloader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+    train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True) # creating data loaders for training and validation datasets, 
+    # which will load the data in batches and shuffle the training data for better learning.
+    test_dataloader = DataLoader(val_dataset, batch_size=32, shuffle=False)
 
-    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # model = AudioCNN(num_classes=len(train_dataset.classes))
-    # model.to(device)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') # setting the device to GPU if available, else CPU.
+    model = AudioCNN(num_classes=len(train_dataset.classes)) # creating an instance of the AudioCNN model defined in model.py, with the number of output classes equal to the number of unique classes in the dataset.
+    model.to(device)
 
-    # num_epochs = 100
-    # criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-    # optimizer = optim.AdamW(model.parameters(), lr=0.0005, weight_decay=0.01)
+    num_epochs = 100
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1) # defining the loss function as cross-entropy loss with label smoothing of 0.1 to prevent overfitting.
+    optimizer = optim.AdamW(model.parameters(), lr=0.0005, weight_decay=0.01) # defining the optimizer as AdamW with a learning rate of 0.0005 and weight decay of 0.01 to prevent overfitting.
+    # AdamW is a variant of Adam optimizer that decouples weight decay from the gradient
 
-    # scheduler = OneCycleLR(
-    #     optimizer,
-    #     max_lr=0.002,
-    #     epochs=num_epochs,
-    #     steps_per_epoch=len(train_dataloader),
-    #     pct_start=0.1
-    # )
+    scheduler = OneCycleLR( # learning rate scheduler that adjusts the learning rate during training using the One Cycle Policy.
+        # this policy starts with a low learning rate, increases it to a maximum value, and then decreases it back to a low value over the course of training.
+        optimizer,
+        max_lr=0.002, # maximum learning rate to reach during the cycle.
+        epochs=num_epochs, # total number of epochs for training.
+        steps_per_epoch=len(train_dataloader), # number of steps (batches) per epoch
+        pct_start=0.1 # percentage of the cycle spent increasing the learning rate (10% here) i.e for the first 10 epochs it will increase the learning rate from initial to max_lr,
+    )
 
-    # best_accuracy = 0.0
+    best_accuracy = 0.0
 
-    # print("Starting training")
-    # for epoch in range(num_epochs):
-    #     model.train()
-    #     epoch_loss = 0.0
+    print("Starting training")
+    for epoch in range(num_epochs): # loop over the dataset multiple times equal to num_epochs
+        model.train()
+        epoch_loss = 0.0 # to keep track of the loss for the epoch
 
-    #     progress_bar = tqdm(
-    #         train_dataloader, desc=f'Epoch {epoch+1}/{num_epochs}')
-    #     for data, target in progress_bar:
-    #         data, target = data.to(device), target.to(device)
+        progress_bar = tqdm( # tqdm shows a live progress bar in the terminal. train_dataloader → gives data in mini-batches (like giving the students 10 questions at a time instead of 1000 at once).
+            train_dataloader, desc=f'Epoch {epoch+1}/{num_epochs}') # creates a progress bar for the training dataloader, with a description showing the current epoch out of total epochs.
+        for data, target in progress_bar: # iterating over the training dataloader in progress bar to get batches of data(inputs) and their corresponding labels (targets).
+            data, target = data.to(device), target.to(device) # moving the data and targets to the specified device (GPU or CPU).
+            # tqdm  is just a layer on top of the dataloader to show progress bar in terminal.
+            # it does not change the data or how we get it from the dataloader.
+            # train_dataloader is the actual dataloader that loads the data in batches from the dataset in each epoch.
+            if np.random.random() > 0.7: # if random number > 0.7 (30% chance), we apply mixup data augmentation to the batch
+                data, target_a, target_b, lam = mixup_data(data, target)
+                output = model(data)
+                loss = mixup_criterion(
+                    criterion, output, target_a, target_b, lam)
+            else: # else (70% chance), we do normal training without mixup.
+                output = model(data)
+                loss = criterion(output, target)
+                # When I said “with 30% chance”, I meant: On average, in 30 out of 100 batches, the code will use Mixup. 
+                # In the other 70 out of 100 batches, it will use normal training.
+                
 
-    #         if np.random.random() > 0.7:
-    #             data, target_a, target_b, lam = mixup_data(data, target)
-    #             output = model(data)
-    #             loss = mixup_criterion(
-    #                 criterion, output, target_a, target_b, lam)
-    #         else:
-    #             output = model(data)
-    #             loss = criterion(output, target)
-
-    #         optimizer.zero_grad()
-    #         loss.backward()
-    #         optimizer.step()
-    #         scheduler.step()
+            optimizer.zero_grad() # zero the gradients before backpropagation to prevent accumulation from previous batches.
+            loss.backward() # backpropagation to compute the gradients of the loss with respect to the model parameters.
+            optimizer.step()  # update the model parameters using the computed gradients.
+            scheduler.step()    # update the learning rate according to the One Cycle Policy.
 
     #         epoch_loss += loss.item()
     #         progress_bar.set_postfix({'Loss': f'{loss.item():.4f}'})
