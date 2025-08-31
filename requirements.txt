@@ -5,7 +5,7 @@ torchaudio==2.7.1
 tqdm
 numpy
 tensorboard
-fastapi
-librosa
-pydantic
-soundfile
+# fastapi
+# librosa
+# pydantic
+# soundfile

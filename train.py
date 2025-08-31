@@ -100,9 +100,9 @@ def train():
     import torchaudio
     from torchaudio import transforms as T
     from datetime import datetime
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_dir = f'/models/tensorboard_logs/run_{timestamp}'
-    writer = SummaryWriter(log_dir)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") # generates a timestamp string to uniquely identify the training run.
+    log_dir = f'/models/tensorboard_logs/run_{timestamp}' # directory to store TensorBoard logs for this training run.
+    writer = SummaryWriter(log_dir) # creates a SummaryWriter object to log training metrics for visualization in TensorBoard.
 
     esc50_dir = Path("/opt/esc50-data") # directory where the ESC-50 dataset is stored inside the Modal container.
 
@@ -194,53 +194,59 @@ def train():
             optimizer.step()  # update the model parameters using the computed gradients.
             scheduler.step()    # update the learning rate according to the One Cycle Policy.
 
-    #         epoch_loss += loss.item()
-    #         progress_bar.set_postfix({'Loss': f'{loss.item():.4f}'})
+            epoch_loss += loss.item() # adding the loss for this batch to the total epoch loss.
+            progress_bar.set_postfix({'Loss': f'{loss.item():.4f}'}) # updating the progress bar to show the loss for the current batch.
 
-    #     avg_epoch_loss = epoch_loss / len(train_dataloader)
-    #     writer.add_scalar('Loss/Train', avg_epoch_loss, epoch)
-    #     writer.add_scalar(
-    #         'Learning_Rate', optimizer.param_groups[0]['lr'], epoch)
+        avg_epoch_loss = epoch_loss / len(train_dataloader) # after all batches in the epoch, we compute the average loss for the epoch by dividing the total epoch loss by the number of batches.
+        writer.add_scalar('Loss/Train', avg_epoch_loss, epoch) # logging the average training loss for the epoch to TensorBoard.
+        writer.add_scalar( # logging the current learning rate to TensorBoard for monitoring.
+            'Learning_Rate', optimizer.param_groups[0]['lr'], epoch)
 
-    #     # Validation after each epoch
-    #     model.eval()
+        # Validation after each epoch
+        model.eval() # set the model to evaluation mode for validation (disables dropout, batchnorm, etc.)
 
-    #     correct = 0
-    #     total = 0
-    #     val_loss = 0
+        correct = 0 # to keep track of the number of correct predictions
+        total = 0 # to keep track of the total number of samples evaluated
+        val_loss = 0 # to keep track of the total validation loss 
 
-    #     with torch.no_grad():
-    #         for data, target in test_dataloader:
-    #             data, target = data.to(device), target.to(device)
-    #             outputs = model(data)
-    #             loss = criterion(outputs, target)
-    #             val_loss += loss.item()
+        with torch.no_grad(): # disables gradient computation for validation to save memory and computation as we don't need gradients for evaluation.
+            for data, target in test_dataloader: # iterating over the validation dataloader to get batches of validation data and their corresponding labels.
+                data, target = data.to(device), target.to(device) # moving the validation data and targets to the specified device (GPU or CPU).
+                outputs = model(data) # getting the model's predictions for the validation data.
+                loss = criterion(outputs, target) # computing the loss for the validation batch using the same criterion as training.
+                val_loss += loss.item() # adding the loss for this validation batch to the total validation loss.
 
-    #             _, predicted = torch.max(outputs.data, 1)
-    #             total += target.size(0)
-    #             correct += (predicted == target).sum().item()
+                _, predicted = torch.max(outputs.data, 1) # getting best predicted class for each sample in the batch.
+                # outputs.data → gives the raw output scores (logits) from the model for each class.
+                # torch.max(..., 1) → computes the maximum value along dimension 1 i.e for each sample in the batch, it finds the class with the highest score.
+                # the _ variable captures the maximum values (not needed here as we only care about the predicted class indices),
+                # and predicted captures the indices of the maximum values (the predicted class labels).
+                total += target.size(0) # updating the total number of samples evaluated by adding the batch size (number of samples in the current batch).
+                correct += (predicted == target).sum().item() # updating the number of correct predictions by comparing the predicted labels with the true labels (target)
+                # (predicted == target) → creates a boolean tensor where each element is True if the prediction is correct and False otherwise.
+                # .sum() → counts the number of True values (correct predictions) in the boolean 
 
-    #     accuracy = 100 * correct / total
-    #     avg_val_loss = val_loss / len(test_dataloader)
+        accuracy = 100 * correct / total # computing the accuracy as the percentage of correct predictions out of the total samples evaluated.
+        avg_val_loss = val_loss / len(test_dataloader) # computing the average validation loss by dividing the total validation loss by the number of validation batches.
 
-    #     writer.add_scalar('Loss/Validation', avg_val_loss, epoch)
-    #     writer.add_scalar('Accuracy/Validation', accuracy, epoch)
+        writer.add_scalar('Loss/Validation', avg_val_loss, epoch)
+        writer.add_scalar('Accuracy/Validation', accuracy, epoch)
 
-    #     print(
-    #         f'Epoch {epoch+1} Loss: {avg_epoch_loss:.4f}, Val Loss: {avg_val_loss:.4f}, Accuracy: {accuracy:.2f}%')
+        print( # printing the epoch summary with average training loss, average validation loss, and validation accuracy.
+            f'Epoch {epoch+1} Loss: {avg_epoch_loss:.4f}, Val Loss: {avg_val_loss:.4f}, Accuracy: {accuracy:.2f}%')
 
-    #     if accuracy > best_accuracy:
-    #         best_accuracy = accuracy
-    #         torch.save({
-    #             'model_state_dict': model.state_dict(),
-    #             'accuracy': accuracy,
-    #             'epoch': epoch,
-    #             'classes': train_dataset.classes
-    #         }, '/models/best_model.pth')
-    #         print(f'New best model saved: {accuracy:.2f}%')
+        if accuracy > best_accuracy: # if the validation accuracy for this epoch is better than the best accuracy seen so far, we save the model checkpoint.
+            best_accuracy = accuracy # update the best accuracy
+            torch.save({ # save the model state dictionary, accuracy, epoch, and class mapping to a file named best_model.pth in the /models directory.
+                'model_state_dict': model.state_dict(), # model.state_dict() contains the model parameters (weights and biases).
+                'accuracy': accuracy,
+                'epoch': epoch,
+                'classes': train_dataset.classes
+            }, '/models/best_model.pth')
+            print(f'New best model saved: {accuracy:.2f}%') # print a message indicating that a new best model has been saved.
 
-    # writer.close()
-    # print(f'Training completed! Best accuracy: {best_accuracy:.2f}%')
+    writer.close()
+    print(f'Training completed! Best accuracy: {best_accuracy:.2f}%') # print a message indicating that training is complete and showing the best accuracy achieved.
 
 @app.local_entrypoint()
 def main():
