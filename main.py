@@ -3,12 +3,8 @@ import io
 import modal
 import numpy as np
 import requests
-import torch.nn as nn
-import torchaudio.transforms as T
-import torch
 from pydantic import BaseModel
-import soundfile as sf
-import librosa
+
 
 from model import AudioCNN
 
@@ -23,6 +19,8 @@ model_volume = modal.Volume.from_name("esc-model") # create a volume to store th
 
 class AudioProcessor: # class to handle audio processing tasks
     def __init__(self):
+        import torch.nn as nn
+        import torchaudio.transforms as T
         self.transform = nn.Sequential( # define a sequential model for audio transformations to convert raw audio to mel spectrogram
                                        # it comes from torchaudio.transforms
             T.MelSpectrogram(
@@ -37,6 +35,7 @@ class AudioProcessor: # class to handle audio processing tasks
         )
 
     def process_audio_chunk(self, audio_data): # function to process a chunk of audio data and return the mel spectrogram
+        import torch
         waveform = torch.from_numpy(audio_data).float() # convert numpy array to torch tensor and ensure it's of type float
 
         waveform = waveform.unsqueeze(0) # add a batch dimension to the waveform tensor
@@ -54,6 +53,7 @@ class InferenceRequest(BaseModel): # define the structure of the inference reque
 class AudioClassifier: 
     @modal.enter() # modal.enter decorator to define a method that runs when the instance starts
     def load_model(self): # This method loads the pre-trained model and prepares it for inference
+        import torch
         print("Loading models on enter") # log message to indicate model loading
         self.device = torch.device(
             'cuda' if torch.cuda.is_available() else 'cpu')
@@ -72,6 +72,9 @@ class AudioClassifier:
 
     @modal.fastapi_endpoint(method="POST") # define a FastAPI endpoint for inference, it will handle POST requests made to this endpoint by clients 
     def inference(self, request: InferenceRequest): # method to handle inference requests, it takes an InferenceRequest object as input
+        import torch
+        import soundfile as sf
+        import librosa
         audio_bytes = base64.b64decode(request.audio_data) # decode the base64 encoded audio data from the request
 
         audio_data, sample_rate = sf.read( # read the audio data using soundfile library and get the audio samples and sample rate
@@ -91,49 +94,82 @@ class AudioClassifier:
             output, feature_maps = self.model(
                 spectrogram, return_feature_maps=True) # pass the spectrogram through the model to get the output logits and feature maps 
                 # feature maps are intermediate outputs from various layers of the model useful for visualization
+                # output is usually the raw class scores (logits) before applying softmax, each value corresponds to a class
+                # output eg - tensor([[-1.2345, 0.5678, 2.3456, ...]]) for a batch size of 1 and multiple classes
 
             output = torch.nan_to_num(output) # replace NaNs with zero and inf with large finite numbers to ensure numerical stability
-            probabilities = torch.softmax(output, dim=1) # apply softmax to get class probabilities
-            top3_probs, top3_indicies = torch.topk(probabilities[0], 3) # get the top 3 predicted class probabilities and their indices
+            probabilities = torch.softmax(output, dim=1) # apply softmax to get class probabilities for raw output scores
+            top3_probs, top3_indicies = torch.topk(probabilities[0], 3) # get the top 3 predicted class probabilities and their indices based on the probabilities tensor
 
-            predictions = [{"class": self.classes[idx.item()], "confidence": prob.item()}
-                           for prob, idx in zip(top3_probs, top3_indicies)] # format the predictions as a list of dictionaries with class names and confidence scores
+            predictions = [{"class": self.classes[idx.item()], "confidence": prob.item()} # 
+                           for prob, idx in zip(top3_probs, top3_indicies)] # putting the top 3 predictions into a list of dictionaries with class names and confidence scores
+            # like dog: 0.95, cat: 0.03, bird: 0.02, .zip is used to pair each probability with its corresponding index i.e joining two lists element-wise
+            # like top3_probs = [0.95, 0.03, 0.02], top3_indicies = [5, 2, 8] => zip(top3_probs, top3_indicies) => [(0.95, 5), (0.03, 2), (0.02, 8)]
 
-            viz_data = {} # dictionary to hold visualization data for feature maps
-            for name, tensor in feature_maps.items(): # iterate over the feature maps returned by the model
-                if tensor.dim() == 4:  # [batch_size, channels, height, width]
-                    aggregated_tensor = torch.mean(tensor, dim=1)
-                    squeezed_tensor = aggregated_tensor.squeeze(0)
-                    numpy_array = squeezed_tensor.cpu().numpy()
-                    clean_array = np.nan_to_num(numpy_array)
-                    viz_data[name] = {
-                        "shape": list(clean_array.shape),
-                        "values": clean_array.tolist()
-                    }
+            # viz_data = {} # dictionary to hold visualization data for feature maps
+            # for name, tensor in feature_maps.items(): # iterate over the feature maps returned by the model
+            #     if tensor.dim() == 4:  # [batch_size, channels, height, width]
+            #         aggregated_tensor = torch.mean(tensor, dim=1)
+            #         squeezed_tensor = aggregated_tensor.squeeze(0)
+            #         numpy_array = squeezed_tensor.cpu().numpy()
+            #         clean_array = np.nan_to_num(numpy_array)
+            #         viz_data[name] = {
+            #             "shape": list(clean_array.shape),
+            #             "values": clean_array.tolist()
+            #         }
 
-            spectrogram_np = spectrogram.squeeze(0).squeeze(0).cpu().numpy()
-            clean_spectrogram = np.nan_to_num(spectrogram_np)
+            # spectrogram_np = spectrogram.squeeze(0).squeeze(0).cpu().numpy()
+            # clean_spectrogram = np.nan_to_num(spectrogram_np)
 
-            max_samples = 8000
-            waveform_sample_rate = 44100
-            if len(audio_data) > max_samples:
-                step = len(audio_data) // max_samples
-                waveform_data = audio_data[::step]
-            else:
-                waveform_data = audio_data
+            # max_samples = 8000
+            # waveform_sample_rate = 44100
+            # if len(audio_data) > max_samples:
+            #     step = len(audio_data) // max_samples
+            #     waveform_data = audio_data[::step]
+            # else:
+            #     waveform_data = audio_data
 
-        response = {
+        response = { # construct the response dictionary to be returned to the client
             "predictions": predictions,
-            "visualization": viz_data,
-            "input_spectrogram": {
-                "shape": list(clean_spectrogram.shape),
-                "values": clean_spectrogram.tolist()
-            },
-            "waveform": {
-                "values": waveform_data.tolist(),
-                "sample_rate": waveform_sample_rate,
-                "duration": len(audio_data) / waveform_sample_rate
-            }
+            # "visualization": viz_data,
+            # "input_spectrogram": {
+            #     "shape": list(clean_spectrogram.shape),
+            #     "values": clean_spectrogram.tolist()
+            # },
+            # "waveform": {
+            #     "values": waveform_data.tolist(),
+            #     "sample_rate": waveform_sample_rate,
+            #     "duration": len(audio_data) / waveform_sample_rate
+            # }
         }
 
         return response
+
+@app.local_entrypoint() # decorator to define the main entry point for local execution
+def main():
+    import soundfile as sf
+    import requests
+    audio_data, sample_rate = sf.read("cb.wav") # read a local audio file using soundfile library
+
+    buffer = io.BytesIO() # create an in-memory bytes buffer to hold the audio data
+    sf.write(buffer, audio_data, sample_rate, format="WAV") # write the audio data to the buffer in WAV format
+    audio_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8") # encode the audio data in base64 format for transmission over HTTP
+    payload = {"audio_data": audio_b64} # create the payload dictionary with the base64 encoded audio data
+
+    server = AudioClassifier() # create an instance of the AudioClassifier class which will start the modal instance if not already running
+    url = server.inference.get_web_url() # get the URL of the inference endpoint to send requests to
+    response = requests.post(url, json=payload) # send a POST request to the inference endpoint with the payload as JSON
+    response.raise_for_status() # raise an error if the request was not successful (status code not in 200-299 range)
+
+    result = response.json() # parse the JSON response from the server
+
+    waveform_info = result.get("waveform", {}) # get the waveform information from the response if available
+    if waveform_info: # if waveform information is present, print some details about it
+        values = waveform_info.get("values", {}) # get the waveform values from the waveform info
+        print(f"First 10 values: {[round(v, 4) for v in values[:10]]}...")
+        print(f"Duration: {waveform_info.get("duration", 0)}")  # print the duration of the audio clip
+
+    print("Top predictions:") # print the top predictions returned by the model
+    for pred in result.get("predictions", []): # iterate over the predictions in the response,each prediction is a dictionary with class name and confidence score
+        print(f"  -{pred["class"]} {pred["confidence"]:0.2%}") # print each class name and its confidence score formatted as a percentage
+    
