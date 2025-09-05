@@ -76,7 +76,7 @@ class AudioCNN(nn.Module): # This is the main class for the audio CNN model
         if not return_feature_maps: # if we do not want to return feature maps
             x = self.conv1(x) # first convolutional layer
             for block in self.layer1: # passing the input through the first layer of residual blocks and iterating through each block as mentioned in the init function
-                x = block(x)
+                x = block(x) # passing the input through each residual block and updating the input for the next block
             for block in self.layer2: # passing the input through the second layer of residual blocks
                 x = block(x)
             for block in self.layer3:
@@ -90,17 +90,20 @@ class AudioCNN(nn.Module): # This is the main class for the audio CNN model
             # this will return the output tensor which is the final output of the model
             return x
         else: # if we want to return feature maps, we will store the feature maps in a dictionary and return it along with the output
+            # this is useful for visualization or debugging purposes to see the intermediate outputs of the model
             feature_maps = {}
-            x = self.conv1(x)
-            feature_maps["conv1"] = x
+            x = self.conv1(x) # first convolutional layer
+            feature_maps["conv1"] = x # storing the feature map after the first convolutional layer in the dictionary
 
-            for i, block in enumerate(self.layer1):
-                x = block(x, feature_maps, prefix=f"layer1.block{i}")
-            feature_maps["layer1"] = x
+            for i, block in enumerate(self.layer1): # passing the input through the first layer of residual blocks and iterating through each block
+                x = block(x, feature_maps, prefix=f"layer1.block{i}") # X is feature map returned after passing through each residual block, this intermediate 
+                # feature map is stored in the dictionary with the key as "layer1.block{i}" where i is the index of the block in the layer
+                # like keys as "layer1.block0", "layer1.block1", etc. enumerate is used to get the index of the block in the layer
+            feature_maps["layer1"] = x # the combined feature map after completing all blocks in layer1 is also stored in the dictionary with the key as "layer1"
 
-            for i, block in enumerate(self.layer2):
-                x = block(x, feature_maps, prefix=f"layer2.block{i}")
-            feature_maps["layer2"] = x
+            for i, block in enumerate(self.layer2): # passing the input through the second layer of residual blocks
+                x = block(x, feature_maps, prefix=f"layer2.block{i}") # passing the feature_maps dictionary and prefix to store the feature maps with appropriate keys
+            feature_maps["layer2"] = x # storing the feature map after the second layer of residual blocks in the dictionary
 
             for i, block in enumerate(self.layer3):
                 x = block(x, feature_maps, prefix=f"layer3.block{i}")

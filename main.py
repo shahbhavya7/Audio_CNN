@@ -106,48 +106,54 @@ class AudioClassifier:
             # like dog: 0.95, cat: 0.03, bird: 0.02, .zip is used to pair each probability with its corresponding index i.e joining two lists element-wise
             # like top3_probs = [0.95, 0.03, 0.02], top3_indicies = [5, 2, 8] => zip(top3_probs, top3_indicies) => [(0.95, 5), (0.03, 2), (0.02, 8)]
 
-            # viz_data = {} # dictionary to hold visualization data for feature maps
-            # for name, tensor in feature_maps.items(): # iterate over the feature maps returned by the model
-            #     if tensor.dim() == 4:  # [batch_size, channels, height, width]
-            #         aggregated_tensor = torch.mean(tensor, dim=1)
-            #         squeezed_tensor = aggregated_tensor.squeeze(0)
-            #         numpy_array = squeezed_tensor.cpu().numpy()
-            #         clean_array = np.nan_to_num(numpy_array)
-            #         viz_data[name] = {
-            #             "shape": list(clean_array.shape),
-            #             "values": clean_array.tolist()
-            #         }
+            viz_data = {} # dictionary to hold visualization data for feature maps returned by the model in heatmap format
+            for name, tensor in feature_maps.items(): # iterate over the feature maps returned by the model in tensor format
+                if tensor.dim() == 4:  # [batch_size, channels, height, width] # check if the tensor has 4 dimensions (batch size, channels, height, width)
+                    aggregated_tensor = torch.mean(tensor, dim=1) # aggregate the feature maps across the channel dimension by taking the mean like there are 64 channels, we take mean across all 64 channels to get a single 2D feature map
+                    # resulting shape will be [batch_size, height, width]
+                    squeezed_tensor = aggregated_tensor.squeeze(0) # remove the batch dimension since batch size is 1 for all inference requests
+                    # resulting shape will be [height, width]
+                    numpy_array = squeezed_tensor.cpu().numpy() # convert the tensor to a numpy array and move it to CPU if it's on GPU as numpy doesn't support GPU tensors
+                    clean_array = np.nan_to_num(numpy_array) # replace NaNs with zero and inf with large finite numbers to ensure numerical stability
+                    viz_data[name] = { # store the shape and values of the feature map in the viz_data dictionary for visualization with key as the layer name
+                        "shape": list(clean_array.shape), # convert the shape tuple to a list for JSON serialization
+                        "values": clean_array.tolist() # store the feature map values as a list 
+                    }
 
-            # spectrogram_np = spectrogram.squeeze(0).squeeze(0).cpu().numpy()
-            # clean_spectrogram = np.nan_to_num(spectrogram_np)
+            spectrogram_np = spectrogram.squeeze(0).squeeze(0).cpu().numpy() # convert the input spectrogram tensor to a numpy array for visualization
+            # it had shape [batch,channel,height,width] => we remove batch and channel dimensions since both are 1 for inference requests so no need to keep them
+            # resulting shape will be [height, width]
+            clean_spectrogram = np.nan_to_num(spectrogram_np) # replace NaNs with zero and inf with large finite numbers to ensure numerical stability
 
-            # max_samples = 8000
-            # waveform_sample_rate = 44100
-            # if len(audio_data) > max_samples:
-            #     step = len(audio_data) // max_samples
-            #     waveform_data = audio_data[::step]
-            # else:
-            #     waveform_data = audio_data
+            max_samples = 8000 # limit the number of samples in the waveform to 8000 for visualization purposes
+            waveform_sample_rate = 44100 # set the sample rate for the waveform visualization
+            if len(audio_data) > max_samples: # if the audio data has more than 8000 samples, downsample it to fit within the limit as we don't want to send too much data back to the client
+                # for visualization purposes
+                step = len(audio_data) // max_samples # calculate the step size for downsampling
+                waveform_data = audio_data[::step] # downsample the audio data by taking every 'step'th sample
+            else:
+                waveform_data = audio_data # if the audio data is within the limit, use it as is
 
         response = { # construct the response dictionary to be returned to the client
-            "predictions": predictions,
-            # "visualization": viz_data,
-            # "input_spectrogram": {
-            #     "shape": list(clean_spectrogram.shape),
-            #     "values": clean_spectrogram.tolist()
-            # },
-            # "waveform": {
-            #     "values": waveform_data.tolist(),
-            #     "sample_rate": waveform_sample_rate,
-            #     "duration": len(audio_data) / waveform_sample_rate
-            # }
+            "predictions": predictions, # list of top 3 predictions with class names and confidence scores
+            "visualization": viz_data, # dictionary of feature maps for visualization
+            "input_spectrogram": { # input spectrogram data for visualization
+                "shape": list(clean_spectrogram.shape),
+                "values": clean_spectrogram.tolist()
+            },
+            "waveform": { # waveform data for visualization
+                "values": waveform_data.tolist(), # convert the waveform numpy array to a list for JSON serialization
+                "sample_rate": waveform_sample_rate, # sample rate of the waveform
+                "duration": len(audio_data) / waveform_sample_rate # duration of the audio clip in seconds
+            }
         }
 
-        return response
+        return response # return the response dictionary to the client
 
 @app.local_entrypoint() # decorator to define the main entry point for local execution
 def main():
     import soundfile as sf
+    
     import requests
     audio_data, sample_rate = sf.read("cb.wav") # read a local audio file using soundfile library
 
@@ -166,7 +172,7 @@ def main():
     waveform_info = result.get("waveform", {}) # get the waveform information from the response if available
     if waveform_info: # if waveform information is present, print some details about it
         values = waveform_info.get("values", {}) # get the waveform values from the waveform info
-        print(f"First 10 values: {[round(v, 4) for v in values[:10]]}...")
+        print(f"First 10 values: {[round(v, 4) for v in values[:10]]}...") # print the first 10 values of the waveform rounded to 4 decimal places
         print(f"Duration: {waveform_info.get("duration", 0)}")  # print the duration of the audio clip
 
     print("Top predictions:") # print the top predictions returned by the model
