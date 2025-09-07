@@ -4,3 +4,102 @@
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif,
     "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
+/* globals.css (or app/globals.css) */
+:root {
+  --glass-border: rgba(255,255,255,0.06);
+  --glass-border-dark: rgba(255,255,255,0.04);
+  --card-bg-light: rgba(255,255,255,0.06);
+  --card-bg-dark: rgba(6,10,16,0.6);
+}
+
+/* glass card with stronger border and subtle inner shadow */
+.glass-card {
+  backdrop-filter: blur(8px) saturate(120%);
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
+  box-shadow: 0 6px 20px rgba(3,7,18,0.55);
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+}
+
+/* dark mode override (Tailwind will add dark class; use selector if you prefer) */
+.dark .glass-card {
+  border: 1px solid var(--glass-border-dark);
+  background: linear-gradient(180deg, rgba(9,14,20,0.54), rgba(9,14,20,0.36));
+}
+
+/* slightly elevated element to help it pop */
+.elevated {
+  box-shadow: 0 10px 30px rgba(2,6,23,0.6);
+  transform: translateZ(0);
+}
+
+/* higher contrast fallback for small panels */
+.high-contrast {
+  background: rgba(7,10,20,0.78) !important;
+  border: 1px solid rgba(255,255,255,0.06) !important;
+}
+/* ===== audio-visualizer layout helpers ===== */
+.visualizer-container,
+.waveform-wrapper,
+.featuremap-inner {
+  position: relative;
+  overflow: hidden; /* keeps canvases inside */
+}
+
+/* If Waveform renders canvas/svg, target these */
+.waveform-canvas,
+.waveform-wrapper canvas,
+.waveform-wrapper svg {
+  max-height: 180px;
+  height: 100%;
+  width: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+/* feature map scrolling region (prevents spilling) */
+.featuremap-scroll {
+  max-height: 220px;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 6px;
+}
+
+/* card helpers */
+.featuremap-card {
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.feature-preview-chip {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* spectrogram + waveform containment */
+.spectrogram-reserved {
+  position: relative;
+  overflow: hidden;
+  min-height: 160px;
+}
+
+/* small responsive tweak */
+@media (max-width: 768px) {
+  .waveform-canvas,
+  .waveform-wrapper canvas,
+  .waveform-wrapper svg { max-height: 120px; }
+  .featuremap-scroll { max-height: 160px; }
+}
+/* remove unwanted white border on waveform canvas/svg */
+.waveform-wrapper canvas,
+.waveform-wrapper svg,
+.waveform-canvas {
+  border: none !important;
+  outline: none !important;
+  background-color: transparent !important;
+}
