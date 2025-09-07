@@ -318,7 +318,7 @@ export default function HomePage() {
             </div>
 
             {vizData ? (
-              <FeatureMap data={vizData.input_spectrogram.values} spectrogram />
+              <FeatureMap data={vizData.input_spectrogram.values} title={`${vizData.input_spectrogram.shape.join(" x ")}`} spectrogram />
             ) : (
               <div className="text-slate-400">No data yet — upload a file</div>
             )}
