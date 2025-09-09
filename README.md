@@ -10,7 +10,7 @@
   [![Audio Processing](https://img.shields.io/badge/Audio-Librosa-FF6B6B?style=for-the-badge&logo=python)](https://librosa.org)
   [![Serverless Training](https://img.shields.io/badge/Training-Modal-4ECDC4?style=for-the-badge&logo=cloud)](https://modal.com)
   
-  **An intelligent audio classification system with real-time CNN feature map visualization**
+  **An intelligent audio analysis system with real-time CNN deep learning visualizations**
   
   *Experience AI-powered audio classification with interactive deep learning insights and stunning visual representations of neural network processing!*
   
